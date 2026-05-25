@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[project]
+name = "pytorch-tensorneat"
+version = "0.1.0"
+authors = [{ name = "Lishuang Wang", email = "wanglishuang22@gmail.com" }]
+description = "PyTorch port of tensorneat"
+readme = "README.md"
+license = { text = "GNU General Public License v3.0 or later" }
+requires-python = ">=3.9"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
+dependencies = [
+    "torch>=2.3",
+    "numpy>=1.26",
+    "networkx>=3.3",
+    "matplotlib>=3.9.0",
+    "sympy>=1.12.1",
+]
+
+[project.urls]
+Homepage = "https://github.com/EMI-Group/tensorneat"
+"Bug Tracker" = "https://github.com/EMI-Group/tensorneat/issues"
