@@ -13,8 +13,6 @@ Current status:
 Quick start:
 
 ```bash
-cd /home/nwilliamsdev/ai-dev/evolution/pytorch_tensorneat
-. .venv/bin/activate
 python -m unittest discover -s tests -p 'test_*.py'
 python examples/func_fit/xor.py
 python examples/func_fit/xor_hyperneat_feedforward.py
