@@ -94,7 +94,7 @@ def check_cycles(nodes, conns, from_idx, to_idx):
         if torch.equal(visited, frontier) or bool(frontier[from_idx]):
             break
         visited = frontier
-        reachable = visited.to(dtype=torch.int32) @ conns.to(dtype=torch.int32)
+        reachable = visited.to(dtype=torch.float32) @ conns.to(dtype=torch.float32)
         frontier = torch.logical_or(visited, reachable > 0)
 
     return frontier[from_idx]

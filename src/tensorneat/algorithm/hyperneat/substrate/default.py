@@ -14,12 +14,11 @@ class DefaultSubstrate(BaseSubstrate):
         self.conns = torch.as_tensor(conns, dtype=torch.float32)
 
     def make_nodes(self, query_res):
-        del query_res
-        return self.nodes.clone()
+        return self.nodes.to(device=query_res.device, dtype=query_res.dtype).clone()
 
     def make_conns(self, query_res):
-        conns = self.conns.clone()
-        conns[:, -1] = query_res.reshape(-1).to(dtype=conns.dtype, device=conns.device)
+        conns = self.conns.to(device=query_res.device, dtype=query_res.dtype).clone()
+        conns[:, -1] = query_res.reshape(-1)
         return conns
 
     @property

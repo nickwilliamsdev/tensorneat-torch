@@ -15,10 +15,22 @@ def _state_seed(state, default=0):
     return int(value)
 
 
-def _generator(seed):
-    generator = torch.Generator()
+def _generator(seed, device=None):
+    generator = torch.Generator(device=device or "cpu")
     generator.manual_seed(int(seed))
     return generator
+
+
+def _move_value_to_device(value, device):
+    if isinstance(value, torch.Tensor):
+        return value.to(device=device)
+    if isinstance(value, State):
+        return State(**{key: _move_value_to_device(val, device) for key, val in value.state_dict.items()})
+    if isinstance(value, tuple):
+        return tuple(_move_value_to_device(item, device) for item in value)
+    if isinstance(value, list):
+        return [_move_value_to_device(item, device) for item in value]
+    return value
 
 
 class NEAT(BaseAlgorithm):
@@ -36,6 +48,8 @@ class NEAT(BaseAlgorithm):
         compatibility_threshold: float = 2.0,
         species_fitness_func: Callable = torch.max,
         species_number_calculate_by: str = "rank",
+        device: str | torch.device = "cpu",
+        evolution_device: str | torch.device | None = None,
     ):
         if species_number_calculate_by not in ["rank", "fitness"]:
             raise ValueError("species_number_calculate_by should be either 'rank' or 'fitness'")
@@ -55,6 +69,11 @@ class NEAT(BaseAlgorithm):
             species_fitness_func,
             species_number_calculate_by,
         )
+        self.device = torch.device(device)
+        if evolution_device is None:
+            self.evolution_device = torch.device("cpu") if self.device.type == "cuda" else self.device
+        else:
+            self.evolution_device = torch.device(evolution_device)
 
     def setup(self, state=State()):
         state = self.genome.setup(state)
@@ -62,8 +81,8 @@ class NEAT(BaseAlgorithm):
         pop_nodes = []
         pop_conns = []
         for idx in range(self.pop_size):
-            generator = _generator(seed + idx)
-            nodes, conns = self.genome.initialize(state, generator)
+            generator = _generator(seed + idx, self.device.type)
+            nodes, conns = self.genome.initialize(state, generator, device=self.device)
             pop_nodes.append(nodes)
             pop_conns.append(conns)
 
@@ -72,7 +91,7 @@ class NEAT(BaseAlgorithm):
         state = state.register(
             pop_nodes=pop_nodes,
             pop_conns=pop_conns,
-            generation=torch.tensor(0.0, dtype=torch.float32),
+            generation=torch.tensor(0.0, dtype=torch.float32, device=self.device),
         )
         state = self.species_controller.setup(state, pop_nodes[0], pop_conns[0])
         state = self.species_controller.speciate(state, self.genome.execute_distance)
@@ -82,11 +101,21 @@ class NEAT(BaseAlgorithm):
         return state.pop_nodes, state.pop_conns
 
     def tell(self, state, fitness):
-        state = state.update(generation=state.generation + 1)
-        state, winner, loser, elite_mask = self.species_controller.update_species(state, fitness)
-        state = self._create_next_generation(state, winner, loser, elite_mask)
-        state = self.species_controller.speciate(state, self.genome.execute_distance)
-        return state
+        evolve_state = state
+        evolve_fitness = fitness
+        if state.pop_nodes.device != self.evolution_device:
+            evolve_state = _move_value_to_device(state, self.evolution_device)
+        if fitness.device != self.evolution_device:
+            evolve_fitness = fitness.to(device=self.evolution_device)
+
+        evolve_state = evolve_state.update(generation=evolve_state.generation + 1)
+        evolve_state, winner, loser, elite_mask = self.species_controller.update_species(evolve_state, evolve_fitness)
+        evolve_state = self._create_next_generation(evolve_state, winner, loser, elite_mask)
+        evolve_state = self.species_controller.speciate(evolve_state, self.genome.execute_distance)
+
+        if evolve_state.pop_nodes.device != self.device:
+            return _move_value_to_device(evolve_state, self.device)
+        return evolve_state
 
     def transform(self, state, individual):
         nodes, conns = individual
@@ -107,7 +136,8 @@ class NEAT(BaseAlgorithm):
         all_nodes_keys = state.pop_nodes[:, :, 0]
         valid_node_keys = all_nodes_keys[~torch.isnan(all_nodes_keys)]
         max_node_key = int(torch.max(valid_node_keys).item()) if valid_node_keys.numel() else 0
-        new_node_keys = torch.arange(self.pop_size, dtype=torch.float32) + (max_node_key + 1)
+        data_device = state.pop_nodes.device
+        new_node_keys = torch.arange(self.pop_size, dtype=torch.float32, device=data_device) + (max_node_key + 1)
 
         if "historical_marker" in self.genome.conn_gene.fixed_attrs:
             markers = []
@@ -116,16 +146,17 @@ class NEAT(BaseAlgorithm):
                     if not torch.isnan(conn[0]):
                         markers.append(float(self.genome.conn_gene.get_historical_marker(state, conn)))
             max_conn_marker = max(markers) if markers else 0.0
-            new_conn_markers = torch.arange(self.pop_size * 3, dtype=torch.float32).reshape(self.pop_size, 3) + (max_conn_marker + 1)
+            new_conn_markers = torch.arange(self.pop_size * 3, dtype=torch.float32, device=data_device).reshape(self.pop_size, 3) + (max_conn_marker + 1)
         else:
-            new_conn_markers = torch.zeros((self.pop_size, 3), dtype=torch.float32)
+            new_conn_markers = torch.zeros((self.pop_size, 3), dtype=torch.float32, device=data_device)
 
         seed = _state_seed(state)
         new_nodes = []
         new_conns = []
+        generator_device = data_device.type
         for idx in range(self.pop_size):
-            crossover_gen = _generator(seed + idx)
-            mutate_gen = _generator(seed + self.pop_size + idx)
+            crossover_gen = _generator(seed + idx, generator_device)
+            mutate_gen = _generator(seed + self.pop_size + idx, generator_device)
             wpn = state.pop_nodes[int(winner[idx])]
             wpc = state.pop_conns[int(winner[idx])]
             lpn = state.pop_nodes[int(loser[idx])]

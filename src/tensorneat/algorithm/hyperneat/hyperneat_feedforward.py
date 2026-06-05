@@ -37,3 +37,4 @@ class HyperNEATFeedForward(HyperNEAT):
             output_transform=output_transform,
         )
         self.pop_size = neat.pop_size
+        self._query_vmap_available = True

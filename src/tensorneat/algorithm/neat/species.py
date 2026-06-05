@@ -45,13 +45,14 @@ class SpeciesController(StatefulBaseClass):
         self.species_number_calculate_by = species_number_calculate_by
 
     def setup(self, state, first_nodes, first_conns):
-        species_keys = torch.full((self.species_size,), torch.nan, dtype=torch.float32)
-        best_fitness = torch.full((self.species_size,), torch.nan, dtype=torch.float32)
-        last_improved = torch.full((self.species_size,), torch.nan, dtype=torch.float32)
-        member_count = torch.full((self.species_size,), torch.nan, dtype=torch.float32)
-        idx2species = torch.zeros(self.pop_size, dtype=torch.float32)
-        center_nodes = torch.full((self.species_size, *first_nodes.shape), torch.nan, dtype=first_nodes.dtype)
-        center_conns = torch.full((self.species_size, *first_conns.shape), torch.nan, dtype=first_conns.dtype)
+        device = first_nodes.device
+        species_keys = torch.full((self.species_size,), torch.nan, dtype=torch.float32, device=device)
+        best_fitness = torch.full((self.species_size,), torch.nan, dtype=torch.float32, device=device)
+        last_improved = torch.full((self.species_size,), torch.nan, dtype=torch.float32, device=device)
+        member_count = torch.full((self.species_size,), torch.nan, dtype=torch.float32, device=device)
+        idx2species = torch.zeros(self.pop_size, dtype=torch.float32, device=device)
+        center_nodes = torch.full((self.species_size, *first_nodes.shape), torch.nan, dtype=first_nodes.dtype, device=device)
+        center_conns = torch.full((self.species_size, *first_conns.shape), torch.nan, dtype=first_conns.dtype, device=device)
 
         species_keys[0] = 0
         best_fitness[0] = -torch.inf
@@ -68,7 +69,7 @@ class SpeciesController(StatefulBaseClass):
             idx2species=idx2species,
             center_nodes=center_nodes,
             center_conns=center_conns,
-            next_species_key=torch.tensor(1.0, dtype=torch.float32),
+            next_species_key=torch.tensor(1.0, dtype=torch.float32, device=device),
         )
         return state.register(species=species_state)
 
@@ -110,11 +111,11 @@ class SpeciesController(StatefulBaseClass):
         for idx in range(self.species_size):
             key = species_state.species_keys[idx]
             if torch.isnan(key):
-                values.append(torch.tensor(torch.nan, dtype=fitness.dtype))
+                values.append(torch.tensor(torch.nan, dtype=fitness.dtype, device=fitness.device))
                 continue
             mask = species_state.idx2species == key
             if not bool(torch.any(mask)):
-                values.append(torch.tensor(torch.nan, dtype=fitness.dtype))
+                values.append(torch.tensor(torch.nan, dtype=fitness.dtype, device=fitness.device))
                 continue
             selected = fitness[mask]
             values.append(self.species_fitness_func(selected))
@@ -123,7 +124,7 @@ class SpeciesController(StatefulBaseClass):
     def _stagnation(self, species_state, species_fitness, generation):
         best_fitness = species_state.best_fitness.clone()
         last_improved = species_state.last_improved.clone()
-        stagnation = torch.zeros(self.species_size, dtype=torch.bool)
+        stagnation = torch.zeros(self.species_size, dtype=torch.bool, device=species_fitness.device)
 
         for idx in range(self.species_size):
             fit = species_fitness[idx]
@@ -139,7 +140,7 @@ class SpeciesController(StatefulBaseClass):
 
         fitness_for_rank = torch.where(torch.isnan(species_fitness), torch.full_like(species_fitness, -torch.inf), species_fitness)
         species_rank = rank_elements(fitness_for_rank)
-        stagnation = torch.where(species_rank < self.species_elitism, torch.tensor(False), stagnation)
+        stagnation = torch.where(species_rank < self.species_elitism, torch.tensor(False, device=stagnation.device), stagnation)
 
         species_keys = species_state.species_keys.clone()
         member_count = species_state.member_count.clone()
@@ -170,18 +171,22 @@ class SpeciesController(StatefulBaseClass):
         valid = ~torch.isnan(species_state.species_keys)
         valid_species_num = int(torch.sum(valid).item())
         if valid_species_num == 0:
-            result = torch.zeros(self.species_size, dtype=torch.int32)
+            result = torch.zeros(self.species_size, dtype=torch.int32, device=species_state.species_keys.device)
             result[0] = self.pop_size
             return result
 
         denominator = (valid_species_num + 1) * valid_species_num / 2
-        rank_score = torch.clamp(valid_species_num - torch.arange(self.species_size), min=0)
+        rank_score = torch.clamp(valid_species_num - torch.arange(self.species_size, device=valid.device), min=0)
         spawn_rate = rank_score / denominator
         target = torch.floor(spawn_rate * self.pop_size)
         previous = torch.nan_to_num(species_state.member_count, nan=0.0)
         spawn_number = previous + (target - previous) * self.spawn_number_change_rate
-        spawn_number = torch.where(valid & (spawn_number < self.min_species_size), torch.tensor(float(self.min_species_size)), spawn_number)
-        spawn_number = torch.where(valid, spawn_number, torch.tensor(0.0))
+        spawn_number = torch.where(
+            valid & (spawn_number < self.min_species_size),
+            torch.tensor(float(self.min_species_size), device=spawn_number.device),
+            spawn_number,
+        )
+        spawn_number = torch.where(valid, spawn_number, torch.tensor(0.0, device=spawn_number.device))
         spawn_number = spawn_number.to(dtype=torch.int32)
         error = self.pop_size - int(torch.sum(spawn_number).item())
         spawn_number[0] += error
@@ -191,31 +196,36 @@ class SpeciesController(StatefulBaseClass):
         species_fitness = species_state.best_fitness.clone()
         valid = ~torch.isnan(species_fitness)
         if not bool(torch.any(valid)):
-            result = torch.zeros(self.species_size, dtype=torch.int32)
+            result = torch.zeros(self.species_size, dtype=torch.int32, device=species_fitness.device)
             result[0] = self.pop_size
             return result
 
         min_fitness = torch.min(species_fitness[valid])
-        shifted = torch.where(valid, species_fitness - min_fitness + 1, torch.tensor(0.0))
+        shifted = torch.where(valid, species_fitness - min_fitness + 1, torch.tensor(0.0, device=species_fitness.device))
         spawn_rate = shifted / torch.sum(shifted)
         target = torch.floor(spawn_rate * self.pop_size)
         previous = torch.nan_to_num(species_state.member_count, nan=0.0)
         spawn_number = previous + (target - previous) * self.spawn_number_change_rate
-        spawn_number = torch.where(valid & (spawn_number < self.min_species_size), torch.tensor(float(self.min_species_size)), spawn_number)
-        spawn_number = torch.where(valid, spawn_number, torch.tensor(0.0))
+        spawn_number = torch.where(
+            valid & (spawn_number < self.min_species_size),
+            torch.tensor(float(self.min_species_size), device=spawn_number.device),
+            spawn_number,
+        )
+        spawn_number = torch.where(valid, spawn_number, torch.tensor(0.0, device=spawn_number.device))
         spawn_number = spawn_number.to(dtype=torch.int32)
         error = self.pop_size - int(torch.sum(spawn_number).item())
         spawn_number[0] += error
         return spawn_number
 
     def _create_crossover_pair(self, species_state, seed, spawn_number, fitness):
-        generator = _generator(seed)
-        winner = torch.zeros(self.pop_size, dtype=torch.long)
-        loser = torch.zeros(self.pop_size, dtype=torch.long)
-        elite_mask = torch.zeros(self.pop_size, dtype=torch.bool)
+        device = species_state.idx2species.device
+        generator = _generator(seed, device.type)
+        winner = torch.zeros(self.pop_size, dtype=torch.long, device=device)
+        loser = torch.zeros(self.pop_size, dtype=torch.long, device=device)
+        elite_mask = torch.zeros(self.pop_size, dtype=torch.bool, device=device)
 
         fill_start = 0
-        population_indices = torch.arange(self.pop_size)
+        population_indices = torch.arange(self.pop_size, device=device)
 
         for species_idx in range(self.species_size):
             if torch.isnan(species_state.species_keys[species_idx]):
@@ -232,7 +242,7 @@ class SpeciesController(StatefulBaseClass):
             member_fitness = fitness[members]
             sorted_order = torch.argsort(member_fitness, descending=True)
             sorted_members = members[sorted_order]
-            survive_size = max(1, int(torch.floor(torch.tensor(self.survival_threshold * len(sorted_members))).item()))
+            survive_size = max(1, int(self.survival_threshold * len(sorted_members)))
             pool = sorted_members[:survive_size]
 
             for local_idx in range(count):
@@ -242,7 +252,7 @@ class SpeciesController(StatefulBaseClass):
                     parent2 = sorted_members[local_idx]
                     elite_mask[global_idx] = True
                 else:
-                    sample = torch.randint(0, len(pool), (2,), generator=generator)
+                    sample = torch.randint(0, len(pool), (2,), generator=generator, device=device)
                     parent1 = pool[int(sample[0])]
                     parent2 = pool[int(sample[1])]
 
@@ -269,8 +279,9 @@ class SpeciesController(StatefulBaseClass):
         pop_nodes = state.pop_nodes
         pop_conns = state.pop_conns
 
-        idx2species = torch.full((self.pop_size,), torch.nan, dtype=torch.float32)
-        o2c_distances = torch.full((self.pop_size,), torch.inf, dtype=torch.float32)
+        device = pop_nodes.device
+        idx2species = torch.full((self.pop_size,), torch.nan, dtype=torch.float32, device=device)
+        o2c_distances = torch.full((self.pop_size,), torch.inf, dtype=torch.float32, device=device)
         center_nodes = species_state.center_nodes.clone()
         center_conns = species_state.center_conns.clone()
         species_keys = species_state.species_keys.clone()
@@ -282,7 +293,7 @@ class SpeciesController(StatefulBaseClass):
             unassigned = torch.isnan(idx2species)
             if not bool(torch.any(unassigned)):
                 break
-            distances = torch.full((self.pop_size,), torch.inf, dtype=torch.float32)
+            distances = torch.full((self.pop_size,), torch.inf, dtype=torch.float32, device=device)
             for pop_idx in range(self.pop_size):
                 if not bool(unassigned[pop_idx]):
                     continue
@@ -337,7 +348,7 @@ class SpeciesController(StatefulBaseClass):
         new_created_mask = (~torch.isnan(species_keys)) & torch.isnan(species_state.best_fitness)
         best_fitness = torch.where(new_created_mask, torch.full_like(species_state.best_fitness, -torch.inf), species_state.best_fitness)
         last_improved = torch.where(new_created_mask, torch.full_like(species_state.last_improved, float(state.generation)), species_state.last_improved)
-        member_count = torch.full((self.species_size,), torch.nan, dtype=torch.float32)
+        member_count = torch.full((self.species_size,), torch.nan, dtype=torch.float32, device=device)
         for idx in range(self.species_size):
             if not torch.isnan(species_keys[idx]):
                 member_count[idx] = torch.sum(idx2species == species_keys[idx]).to(dtype=torch.float32)
@@ -350,6 +361,6 @@ class SpeciesController(StatefulBaseClass):
             idx2species=idx2species,
             center_nodes=center_nodes,
             center_conns=center_conns,
-            next_species_key=torch.tensor(next_species_key, dtype=torch.float32),
+            next_species_key=torch.tensor(next_species_key, dtype=torch.float32, device=device),
         )
         return state.update(species=species_state)

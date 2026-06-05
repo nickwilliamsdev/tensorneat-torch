@@ -37,16 +37,16 @@ class DefaultMutation(BaseMutation):
         nodes = nodes.clone()
         conns = conns.clone()
 
-        if self.node_add > 0 and float(torch.rand((), generator=generator)) < self.node_add:
+        if self.node_add > 0 and float(torch.rand((), generator=generator, device=nodes.device)) < self.node_add:
             nodes, conns = self._mutate_add_node(state, genome, generator, nodes, conns, new_node_key, new_conn_key)
 
-        if self.node_delete > 0 and float(torch.rand((), generator=generator)) < self.node_delete:
+        if self.node_delete > 0 and float(torch.rand((), generator=generator, device=nodes.device)) < self.node_delete:
             nodes, conns = self._mutate_delete_node(state, genome, generator, nodes, conns)
 
-        if self.conn_add > 0 and float(torch.rand((), generator=generator)) < self.conn_add:
+        if self.conn_add > 0 and float(torch.rand((), generator=generator, device=conns.device)) < self.conn_add:
             nodes, conns = self._mutate_add_conn(state, genome, generator, nodes, conns, new_conn_key)
 
-        if self.conn_delete > 0 and float(torch.rand((), generator=generator)) < self.conn_delete:
+        if self.conn_delete > 0 and float(torch.rand((), generator=generator, device=conns.device)) < self.conn_delete:
             nodes, conns = self._mutate_delete_conn(generator, nodes, conns)
 
         return nodes, conns

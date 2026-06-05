@@ -48,7 +48,7 @@ class RecurrentMutation(DefaultMutation):
                 continue
 
             forms_cycle = bool(check_cycles(nodes, conns_exist, int(from_idx), int(to_idx)))
-            force_recur = float(torch.rand((), generator=generator)) < self.p_recur
+            force_recur = float(torch.rand((), generator=generator, device=conns.device)) < self.p_recur
             if force_recur and not forms_cycle:
                 continue
 

@@ -93,12 +93,15 @@ class Pipeline(StatefulBaseClass):
         pop_transformed = [self.algorithm.transform(state, (pop[0][idx], pop[1][idx])) for idx in range(self.pop_size)]
         self._last_pop_transformed = pop_transformed
 
-        seed = int(state.randkey) if isinstance(state.randkey, torch.Tensor) else int(state.randkey)
+        if isinstance(state.randkey, torch.Tensor):
+            seed = state.randkey.to(dtype=torch.int64)
+        else:
+            seed = torch.tensor(int(state.randkey), dtype=torch.int64)
         fitnesses = self._evaluate_population(state, pop_transformed, seed)
         fitnesses = torch.where(torch.isnan(fitnesses), torch.full_like(fitnesses, -torch.inf), fitnesses)
 
         next_state = self.algorithm.tell(state, fitnesses)
-        return next_state.update(randkey=torch.tensor(seed + self.pop_size + 1, dtype=torch.int64)), pop, fitnesses
+        return next_state.update(randkey=seed + self.pop_size + 1), pop, fitnesses
 
     def auto_run(self, state):
         for _ in range(self.generation_limit):
@@ -175,28 +178,30 @@ class Pipeline(StatefulBaseClass):
         if self.problem.jitable and self._batched_eval_available:
             return self._evaluate_population_batched(state, pop_transformed, seed)
 
+        fitness_device = state.pop_nodes.device if "pop_nodes" in state else None
         fitnesses = []
         for idx, transformed in enumerate(pop_transformed):
-            individual_seed = torch.tensor(seed + idx, dtype=torch.int64)
+            individual_seed = seed + idx
             fitness = self.problem.evaluate(state, individual_seed, self.algorithm.forward, transformed)
-            fitnesses.append(torch.as_tensor(fitness, dtype=torch.float32))
+            fitnesses.append(torch.as_tensor(fitness, dtype=torch.float32, device=fitness_device))
         return torch.stack(fitnesses)
 
     def _evaluate_population_batched(self, state, pop_transformed, seed):
         batch_size = self.eval_batch_size or self.pop_size
+        fitness_device = state.pop_nodes.device if "pop_nodes" in state else None
         fitness_batches = []
         batched_evaluator = self._get_batched_evaluator()
 
         for batch_start in range(0, self.pop_size, batch_size):
             batch_end = min(batch_start + batch_size, self.pop_size)
             batch_transformed = self._stack_tree(pop_transformed[batch_start:batch_end])
-            batch_seeds = torch.arange(batch_start, batch_end, dtype=torch.int64) + seed
+            batch_seeds = torch.arange(batch_start, batch_end, dtype=torch.int64, device=seed.device) + seed
             try:
                 batch_fitnesses = batched_evaluator(state, batch_seeds, batch_transformed)
             except RuntimeError:
                 self._batched_eval_available = False
                 return self._evaluate_population(state, pop_transformed, seed)
-            fitness_batches.append(torch.as_tensor(batch_fitnesses, dtype=torch.float32))
+            fitness_batches.append(torch.as_tensor(batch_fitnesses, dtype=torch.float32, device=fitness_device))
 
         return torch.cat(fitness_batches, dim=0)
 

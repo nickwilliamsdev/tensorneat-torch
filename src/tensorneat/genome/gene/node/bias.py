@@ -76,19 +76,22 @@ class BiasNode(BaseNode):
 
     def new_random_attrs(self, state, generator):
         del state
-        bias = torch.randn((), generator=generator) * self.bias_init_std + self.bias_init_mean
+        rand_device = generator.device
+        bias = torch.randn((), generator=generator, device=rand_device) * self.bias_init_std + self.bias_init_mean
         bias = torch.clamp(bias, self.bias_lower_bound, self.bias_upper_bound)
         aggregation = torch.randint(
             low=0,
             high=len(self.aggregation_options),
             size=(),
             generator=generator,
+            device=rand_device,
         )
         activation = torch.randint(
             low=0,
             high=len(self.activation_options),
             size=(),
             generator=generator,
+            device=rand_device,
         )
         return torch.stack(
             [

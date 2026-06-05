@@ -39,6 +39,7 @@ class HyperNEAT(BaseAlgorithm):
             output_transform=output_transform,
         )
         self.pop_size = neat.pop_size
+        self._query_vmap_available = True
 
     def setup(self, state=State()):
         state = self.neat.setup(state)
@@ -53,9 +54,22 @@ class HyperNEAT(BaseAlgorithm):
 
     def transform(self, state, individual):
         transformed = self.neat.transform(state, individual)
-        query_res = torch.stack(
-            [self.neat.forward(state, transformed, coor) for coor in self.substrate.query_coors]
-        )
+        ref_tensor = self._find_first_tensor(transformed)
+        if ref_tensor is None:
+            query_coors = self.substrate.query_coors
+        else:
+            query_coors = self.substrate.query_coors.to(device=ref_tensor.device, dtype=ref_tensor.dtype)
+
+        if self._query_vmap_available:
+            evaluator = lambda coor: self.neat.forward(state, transformed, coor)
+            try:
+                query_res = torch.vmap(evaluator)(query_coors)
+            except RuntimeError:
+                self._query_vmap_available = False
+                query_res = torch.stack([self.neat.forward(state, transformed, coor) for coor in query_coors])
+        else:
+            query_res = torch.stack([self.neat.forward(state, transformed, coor) for coor in query_coors])
+
         query_res = torch.where(
             (-self.weight_threshold < query_res) & (query_res < self.weight_threshold),
             torch.zeros_like(query_res),
@@ -83,6 +97,23 @@ class HyperNEAT(BaseAlgorithm):
 
     def show_details(self, state, fitness):
         return self.neat.show_details(state, fitness)
+
+    def _find_first_tensor(self, value):
+        if isinstance(value, torch.Tensor):
+            return value
+        if isinstance(value, tuple):
+            for item in value:
+                found = self._find_first_tensor(item)
+                if found is not None:
+                    return found
+            return None
+        if isinstance(value, list):
+            for item in value:
+                found = self._find_first_tensor(item)
+                if found is not None:
+                    return found
+            return None
+        return None
 
 
 class HyperNEATNode(BaseNode):

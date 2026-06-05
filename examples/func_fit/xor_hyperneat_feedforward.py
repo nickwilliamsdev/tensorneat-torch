@@ -1,3 +1,5 @@
+import torch
+
 from tensorneat import Pipeline
 from tensorneat.algorithm import HyperNEATFeedForward, MLPSubstrate, NEAT
 from tensorneat.common import ACT
@@ -6,11 +8,14 @@ from tensorneat.problem import XOR
 
 
 def main():
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    print(f"using device: {device}")
+
     pipeline = Pipeline(
         algorithm=HyperNEATFeedForward(
             substrate=MLPSubstrate(layers=[3, 4, 1], coor_range=(-3.0, 3.0, -3.0, 3.0)),
             neat=NEAT(
-                pop_size=32,
+                pop_size=1000,
                 species_size=6,
                 survival_threshold=0.25,
                 genome=DefaultGenome(
@@ -20,6 +25,7 @@ def main():
                     max_conns=16,
                     output_transform=ACT.tanh,
                 ),
+                device=device,
             ),
             activation=ACT.tanh,
             output_transform=ACT.sigmoid,

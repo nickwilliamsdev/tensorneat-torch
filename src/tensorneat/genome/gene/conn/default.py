@@ -40,7 +40,7 @@ class DefaultConn(BaseConn):
 
     def new_random_attrs(self, state, generator):
         del state
-        weight = torch.randn((), generator=generator) * self.weight_init_std + self.weight_init_mean
+        weight = torch.randn((), generator=generator, device=generator.device) * self.weight_init_std + self.weight_init_mean
         weight = torch.clamp(weight, self.weight_lower_bound, self.weight_upper_bound)
         return torch.tensor([float(weight)], dtype=torch.float32)
 
