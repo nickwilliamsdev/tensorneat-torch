@@ -157,9 +157,9 @@ class BaseGenome(StatefulBaseClass):
         return self.output_idx.tolist()
 
     def hash(self, nodes, conns):
-        node_hashes = [self.node_gene.hash(node) for node in nodes]
-        conn_hashes = [self.conn_gene.hash(conn) for conn in conns]
-        combined = torch.tensor(node_hashes + conn_hashes, dtype=torch.int64)
+        node_hashes = torch.vmap(self.node_gene.hash)(nodes)
+        conn_hashes = torch.vmap(self.conn_gene.hash)(conns)
+        combined = torch.cat([node_hashes, conn_hashes])
         return hash_array(combined)
 
     def repr(self, state, nodes, conns, precision=2):

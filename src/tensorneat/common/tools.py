@@ -1,5 +1,3 @@
-import zlib
-
 import torch
 
 # Infinite int used to represent an unavailable index in integer tensors.
@@ -97,5 +95,29 @@ def argmin_with_mask(arr, mask):
 
 
 def hash_array(arr):
-    buffer = arr.detach().contiguous().cpu().numpy().tobytes()
-    return zlib.crc32(buffer)
+    flat_bytes = arr.detach().contiguous().view(torch.uint8).reshape(-1)
+    if flat_bytes.numel() == 0:
+        return torch.zeros((), dtype=torch.int64, device=arr.device)
+
+    pad = (-flat_bytes.numel()) % 4
+    if pad:
+        flat_bytes = torch.cat(
+            [flat_bytes, torch.zeros(pad, dtype=torch.uint8, device=flat_bytes.device)]
+        )
+
+    byte_groups = flat_bytes.reshape(-1, 4).to(dtype=torch.uint32)
+    uint32_arr = (
+        byte_groups[:, 0]
+        | (byte_groups[:, 1] << 8)
+        | (byte_groups[:, 2] << 16)
+        | (byte_groups[:, 3] << 24)
+    )
+
+    hash_val = torch.zeros((), dtype=torch.uint32, device=uint32_arr.device)
+    constant = torch.tensor(0x9E3779B9, dtype=torch.uint32, device=uint32_arr.device)
+    for idx in range(uint32_arr.numel()):
+        hash_val = hash_val ^ (
+            uint32_arr[idx] + constant + (hash_val << 6) + (hash_val >> 2)
+        )
+
+    return hash_val.to(dtype=torch.int64)
