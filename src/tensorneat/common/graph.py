@@ -10,18 +10,19 @@ def topological_sort(nodes, conns):
     in_degree = torch.where(mask, torch.nan, torch.sum(conns, dim=0).to(dtype=nodes.dtype))
     result = torch.full(in_degree.shape, I_INF, dtype=torch.int64, device=nodes.device)
 
-    idx = 0
-    while True:
+    all_indices = torch.arange(conns.shape[0], device=nodes.device, dtype=torch.int64)
+    for idx in range(result.shape[0]):
         node_idx = fetch_first(in_degree == 0.0)
-        if int(node_idx) == I_INF:
-            break
+        has_candidate = node_idx != I_INF
+        safe_node_idx = torch.where(has_candidate, node_idx, torch.zeros_like(node_idx))
 
-        result[idx] = node_idx
-        in_degree[node_idx] = -1
+        result[idx] = torch.where(has_candidate, safe_node_idx, result[idx])
 
-        children = conns[node_idx, :].to(dtype=torch.bool)
-        in_degree = torch.where(children, in_degree - 1, in_degree)
-        idx += 1
+        selected_mask = all_indices == safe_node_idx
+        marked_in_degree = torch.where(selected_mask, torch.full_like(in_degree, -1), in_degree)
+        children = conns[safe_node_idx, :].to(dtype=torch.bool)
+        reduced_in_degree = torch.where(children, marked_in_degree - 1, marked_in_degree)
+        in_degree = torch.where(has_candidate, reduced_in_degree, in_degree)
 
     return result
 
@@ -86,15 +87,16 @@ def check_cycles(nodes, conns, from_idx, to_idx):
     conns = conns.clone()
     conns[from_idx, to_idx] = True
 
-    visited = torch.zeros(conns.shape[0], dtype=torch.bool, device=conns.device)
-    frontier = visited.clone()
+    frontier = torch.zeros(conns.shape[0], dtype=torch.bool, device=conns.device)
     frontier[to_idx] = True
+    done = torch.tensor(False, dtype=torch.bool, device=conns.device)
+    conns_float = conns.to(dtype=torch.float32)
 
-    while True:
-        if torch.equal(visited, frontier) or bool(frontier[from_idx]):
-            break
-        visited = frontier
-        reachable = visited.to(dtype=torch.float32) @ conns.to(dtype=torch.float32)
-        frontier = torch.logical_or(visited, reachable > 0)
+    for _ in range(conns.shape[0]):
+        reachable = frontier.to(dtype=torch.float32) @ conns_float
+        next_frontier = torch.logical_or(frontier, reachable > 0)
+        next_done = torch.logical_or(done, torch.logical_or(torch.all(next_frontier == frontier), next_frontier[from_idx]))
+        frontier = torch.where(done, frontier, next_frontier)
+        done = next_done
 
     return frontier[from_idx]

@@ -18,25 +18,33 @@ def attach_with_inf(arr, idx):
 
 
 def fetch_first(mask, default=I_INF):
-    indices = torch.nonzero(mask, as_tuple=False)
-    if indices.numel() == 0:
-        return torch.tensor(default, dtype=torch.int64, device=mask.device)
-    return indices[0, 0].to(dtype=torch.int64)
+    flat_mask = mask.reshape(-1)
+    default_tensor = torch.as_tensor(default, dtype=torch.int64, device=mask.device)
+    if flat_mask.numel() == 0:
+        return default_tensor
+
+    idx = torch.argmax(flat_mask.to(dtype=torch.int64))
+    return torch.where(flat_mask[idx], idx.to(dtype=torch.int64), default_tensor)
 
 
 def fetch_random(generator, mask, default=I_INF):
-    indices = torch.nonzero(mask, as_tuple=False).flatten()
-    if indices.numel() == 0:
-        return torch.tensor(default, dtype=torch.int64, device=mask.device)
+    flat_mask = mask.reshape(-1)
+    default_tensor = torch.as_tensor(default, dtype=torch.int64, device=mask.device)
+    if flat_mask.numel() == 0:
+        return default_tensor
 
-    choice = torch.randint(
-        low=0,
-        high=indices.numel(),
-        size=(),
-        generator=generator,
-        device=mask.device,
+    flat_mask_int = flat_mask.to(dtype=torch.int64)
+    true_cnt = torch.sum(flat_mask_int)
+    cumsum = torch.cumsum(flat_mask_int, dim=0)
+    target = (
+        torch.floor(
+            torch.rand((), generator=generator, device=mask.device, dtype=torch.float32)
+            * true_cnt.to(dtype=torch.float32)
+        ).to(dtype=torch.int64)
+        + 1
     )
-    return indices[choice].to(dtype=torch.int64)
+    target_mask = torch.where(true_cnt == 0, torch.zeros_like(flat_mask), cumsum >= target)
+    return fetch_first(target_mask, default_tensor)
 
 
 def rank_elements(array, reverse=False):
