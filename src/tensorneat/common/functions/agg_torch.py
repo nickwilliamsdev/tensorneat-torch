@@ -19,10 +19,9 @@ def min_(z, mask):
 
 def maxabs_(z, mask):
     masked = torch.where(mask, z, torch.zeros_like(z))
-    index = torch.argmax(torch.abs(masked), dim=0)
-    if masked.ndim == 1:
-        return masked[index]
-    return masked[index, torch.arange(masked.shape[1], device=masked.device)]
+    index = torch.argmax(torch.abs(masked), dim=0, keepdim=True)
+    gathered = torch.take_along_dim(masked, index, dim=0)
+    return gathered.squeeze(0)
 
 
 def mean_(z, mask):

@@ -69,6 +69,11 @@ def _coerce_index(idx):
 
 def apply_activation(idx, z, act_funcs):
     idx = _coerce_index(idx)
+    if len(act_funcs) == 1:
+        identity_mask = idx == -1
+        activated = act_funcs[0](z)
+        return torch.where(identity_mask, z, activated)
+
     candidates = torch.stack([func(z) for func in act_funcs], dim=0)
     identity_mask = idx == -1
     safe_idx = torch.where(identity_mask, torch.zeros_like(idx), idx)
@@ -78,8 +83,12 @@ def apply_activation(idx, z, act_funcs):
 
 def apply_aggregation(idx, z, agg_funcs, mask):
     idx = _coerce_index(idx)
-    candidates = torch.stack([func(z, mask) for func in agg_funcs], dim=0)
     has_inputs = torch.any(mask)
+    if len(agg_funcs) == 1:
+        aggregated = agg_funcs[0](z, mask)
+        return torch.where(has_inputs, aggregated, torch.zeros((), dtype=z.dtype, device=z.device))
+
+    candidates = torch.stack([func(z, mask) for func in agg_funcs], dim=0)
     selected = candidates[idx]
     return torch.where(has_inputs, selected, torch.zeros((), dtype=z.dtype, device=z.device))
 

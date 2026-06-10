@@ -157,8 +157,18 @@ class BaseGenome(StatefulBaseClass):
         return self.output_idx.tolist()
 
     def hash(self, nodes, conns):
-        node_hashes = torch.vmap(self.node_gene.hash)(nodes)
-        conn_hashes = torch.vmap(self.conn_gene.hash)(conns)
+        if getattr(self, "_hash_vmap_available", True):
+            try:
+                node_hashes = torch.vmap(self.node_gene.hash)(nodes)
+                conn_hashes = torch.vmap(self.conn_gene.hash)(conns)
+            except RuntimeError:
+                self._hash_vmap_available = False
+                node_hashes = torch.stack([self.node_gene.hash(node) for node in nodes])
+                conn_hashes = torch.stack([self.conn_gene.hash(conn) for conn in conns])
+        else:
+            node_hashes = torch.stack([self.node_gene.hash(node) for node in nodes])
+            conn_hashes = torch.stack([self.conn_gene.hash(conn) for conn in conns])
+
         combined = torch.cat([node_hashes, conn_hashes])
         return hash_array(combined)
 
