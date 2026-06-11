@@ -192,9 +192,10 @@ class DefaultNode(BaseNode):
             valid_mask = ~torch.isnan(inputs)
         z = apply_aggregation(aggregation, inputs, self.aggregation_options, valid_mask)
         z = bias + response * z
-        activated = apply_activation(activation, z, self.activation_options)
         output_mask = torch.as_tensor(is_output_node, device=z.device, dtype=torch.bool)
-        return torch.where(output_mask, z, activated)
+        if bool(output_mask):
+            return z
+        return apply_activation(activation, z, self.activation_options)
 
     def repr(self, state, node, precision=2, idx_width=3, func_width=8):
         del state
